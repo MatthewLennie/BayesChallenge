@@ -13,6 +13,9 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+import matplotlib.pyplot as plt
+#import xgboost as xgb
 dat = pd.read_csv("challenge_data.csv")
 keys = ['game_time', 'winner', 'feature_1','feature_2', 'feature_3', 'feature_4']
 sns.pairplot(dat[keys])
@@ -21,10 +24,7 @@ sns.pairplot(dat[keys])
 # not sure about why but it appears that the sequence is initialized with negative zeros
 # for the first 60 seconds. 
 # In this analysis I have removed but I consider this an open question. 
-
-
-dat = dat[dat.winner>=0]
-
+#dat = dat[dat.winner>=0]
 
 #%% Uh oh
 #this shows something wrong. 
@@ -56,16 +56,14 @@ sm.graphics.influence_plot(results)
 
 dat.drop('feature_4',axis=1,inplace=True)
 #%%
-X_train, X_test, y_train, y_test = train_test_split(dat[['feature_1','feature_2']], dat['winner'], test_size=0.33, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(dat[['feature_1','feature_2','feature_3']], dat['winner'], test_size=0.33, random_state=42)
 #train scaler on the training data only, no data leakages. 
 scaler = StandardScaler().fit(X_train)
-
 X_train_scaled = scaler.transform(X_train)
-
 X_test_scaled = scaler.transform(X_test)
 
 
-
+#%% Just tried straight up fitting a few basic models ignoring the time series effects. 
 #%%
 clf = LinearDiscriminantAnalysis()
 clf.fit(X_train_scaled, y_train)
@@ -77,13 +75,67 @@ clf = LogisticRegression(random_state=0, solver='lbfgs').fit(X_train, y_train)
 print(clf.score(X_train_scaled,y_train))
 print(clf.score(X_test_scaled,y_test))
 
-##
+#%%
+clf = RandomForestClassifier(n_estimators=100, max_depth=1,random_state=0)
+clf.fit(X_train, y_train)
+
+print(clf.score(X_train, y_train))
+print(clf.score(X_test, y_test))
+
+
 #%%
 grouped = dat.groupby('match_id')
-#%%
+new_df =[]
 groups =list(grouped.groups.keys())
-sns.pairplot(grouped.get_group(groups[1]))
+variances = []
+for group in grouped:
+    group[1]['feature_1_cum'] = group[1]['feature_1'].cumsum()
+    group[1]['feature_2_cum'] = group[1]['feature_2'].cumsum()
+    group[1]['feature_1_var'] = group[1]['feature_1'].rolling(4).var()
+    group[1]['feature_2_var'] = group[1]['feature_2'].rolling(4).var()
+#    group[1][group[1].winner>=0]
+    new_df.append(group[1])
+    
+df = pd.concat(new_df)
 
 
+#sns.pairplot(df[['game_time', 'winner', 'feature_1','feature_2', 'feature_3','feature_1_cum','feature_2_cum']].sample(1000),hue='winner')
+
+#%%
+
+df = df[df.winner>=0]
+df.dropna(inplace=True)
+X_train, X_test, y_train, y_test = train_test_split(df[['feature_1','feature_2','feature_3','feature_1_cum','feature_2_cum','feature_1_var','feature_2_var']], df['winner'], test_size=0.33, random_state=42)
+#train scaler on the training data only, no data leakages. 
+scaler = StandardScaler().fit(X_train)
+X_train_scaled = scaler.transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+#%%
+clf1 = LinearDiscriminantAnalysis()
+clf1.fit(X_train_scaled, y_train)
+print(clf1.score(X_train_scaled,y_train))
+print(clf1.score(X_test_scaled,y_test))
+
+#%%
+clf2 = LogisticRegression(random_state=0, solver='lbfgs').fit(X_train, y_train)
+print(clf2.score(X_train_scaled,y_train))
+print(clf2.score(X_test_scaled,y_test))
+
+#%%
+clf3 = RandomForestClassifier(n_estimators=100, max_depth=4,random_state=0)
+clf3.fit(X_train, y_train)
+
+print(clf3.score(X_train, y_train))
+print(clf3.score(X_test, y_test))
+
+#%%
+
+eclf2 = VotingClassifier(estimators=[
+        ('lda', clf1), ('lr', clf2), ('rf', clf3)],
+        voting='soft')
+eclf2 = eclf2.fit(X_train, y_train)
+print(eclf2.score(X_train,y_train))
+print(eclf2.score(X_test,y_test))
 
 
